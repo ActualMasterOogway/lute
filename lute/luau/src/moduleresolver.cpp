@@ -10,7 +10,7 @@ namespace Luau
 
 std::optional<Luau::SourceCode> LuteModuleResolver::readSource(const Luau::ModuleName& name)
 {
-    if (std::optional<std::string> source = readFile(name))
+    if (std::optional<std::string> source = ::readSourceFromVfs(name))
         return Luau::SourceCode{*source, Luau::SourceCode::Module};
     return std::nullopt;
 }
@@ -24,7 +24,7 @@ std::optional<Luau::ModuleInfo> LuteModuleResolver::resolveModule(const Luau::Mo
 
         std::string error;
         std::string requirerChunkname = "@" + context->name;
-        std::optional<std::string> absolutePath = resolveRequire(requirePath, std::move(requirerChunkname), &error);
+        std::optional<std::string> absolutePath = ::resolveRequire(requirePath, std::move(requirerChunkname), &error);
         if (!absolutePath)
         {
             printf("Failed to resolve require: %s\n", error.c_str());

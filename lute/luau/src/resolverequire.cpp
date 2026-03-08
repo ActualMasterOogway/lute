@@ -1,9 +1,16 @@
 #include "lute/resolverequire.h"
 
+#include "lute/batteriesvfs.h"
+#include "lute/clibatteries.h"
 #include "lute/filevfs.h"
+#include "lute/lutevfs.h"
+#include "lute/lutemodules.h"
 #include "lute/modulepath.h"
+#include "lute/stdlib.h"
+#include "lute/stdlibvfs.h"
 
 #include "Luau/Common.h"
+#include "Luau/FileUtils.h"
 #include "Luau/RequireNavigator.h"
 
 #include "lua.h"
@@ -12,11 +19,11 @@
 #include <optional>
 #include <string>
 
-// FileVfsContext
-class FileVfsContext : public Luau::Require::NavigationContext
+// LuteVfsContext
+class LuteVfsContext : public Luau::Require::NavigationContext
 {
 public:
-    FileVfsContext(std::string requirerChunkname);
+    LuteVfsContext(std::string requirerChunkname);
 
     NavigateResult resetToRequirer() override;
     NavigateResult jumpToAlias(const std::string& path) override;
@@ -30,7 +37,20 @@ public:
     std::optional<std::string> getAlias(const std::string& alias) const override;
     std::optional<std::string> getConfig() const override;
 
-    FileVfs vfs;
+    FileVfs fileVfs;
+    StdLibVfs stdLibVfs;
+    LuteVfs luteVfs;
+    BatteriesVfs batteriesVfs;
+
+    enum class VFSType
+    {
+        Disk,
+        Std,
+        Lute,
+        Batteries,
+    };
+    VFSType vfsType = VFSType::Disk;
+
     std::string requirerChunkname;
 };
 
@@ -75,49 +95,137 @@ static NC::ConfigStatus convert(ConfigStatus status)
     return result;
 }
 
-FileVfsContext::FileVfsContext(std::string requirerChunkname)
+LuteVfsContext::LuteVfsContext(std::string requirerChunkname)
     : requirerChunkname(std::move(requirerChunkname))
 {
 }
 
-NC::NavigateResult FileVfsContext::resetToRequirer()
+NC::NavigateResult LuteVfsContext::resetToRequirer()
 {
-    return convert(vfs.resetToPath(requirerChunkname));
+    if (requirerChunkname.rfind("@std", 0) == 0)
+    {
+        vfsType = VFSType::Std;
+        return convert(stdLibVfs.resetToPath(requirerChunkname));
+    }
+    else if (requirerChunkname.rfind("@lute", 0) == 0)
+    {
+        vfsType = VFSType::Lute;
+        return convert(luteVfs.resetToPath(requirerChunkname));
+    }
+    else if (requirerChunkname.rfind("@batteries", 0) == 0)
+    {
+        vfsType = VFSType::Batteries;
+        return convert(batteriesVfs.resetToPath(requirerChunkname));
+    }
+    else
+    {
+        vfsType = VFSType::Disk;
+        return convert(fileVfs.resetToPath(requirerChunkname));
+    }
 }
 
-NC::NavigateResult FileVfsContext::jumpToAlias(const std::string& path)
+NC::NavigateResult LuteVfsContext::jumpToAlias(const std::string& path)
 {
-    return convert(vfs.resetToPath(path));
+    if (path.rfind("@std", 0) == 0)
+    {
+        vfsType = VFSType::Std;
+        return convert(stdLibVfs.resetToPath(path));
+    }
+    else if (path.rfind("@lute", 0) == 0)
+    {
+        vfsType = VFSType::Lute;
+        return convert(luteVfs.resetToPath(path));
+    }
+    else if (path.rfind("@batteries", 0) == 0)
+    {
+        vfsType = VFSType::Batteries;
+        return convert(batteriesVfs.resetToPath(path));
+    }
+    else
+    {
+        vfsType = VFSType::Disk;
+        return convert(fileVfs.resetToPath(path));
+    }
 }
 
-NC::NavigateResult FileVfsContext::toParent()
+NC::NavigateResult LuteVfsContext::toParent()
 {
-    return convert(vfs.toParent());
+    switch (vfsType)
+    {
+    case VFSType::Disk:
+        return convert(fileVfs.toParent());
+    case VFSType::Std:
+        return convert(stdLibVfs.toParent());
+    case VFSType::Lute:
+        return convert(luteVfs.toParent());
+    case VFSType::Batteries:
+        return convert(batteriesVfs.toParent());
+    }
+    return NC::NavigateResult::NotFound;
 }
 
-NC::NavigateResult FileVfsContext::toChild(const std::string& component)
+NC::NavigateResult LuteVfsContext::toChild(const std::string& component)
 {
-    return convert(vfs.toChild(component));
+    switch (vfsType)
+    {
+    case VFSType::Disk:
+        return convert(fileVfs.toChild(component));
+    case VFSType::Std:
+        return convert(stdLibVfs.toChild(component));
+    case VFSType::Lute:
+        return convert(luteVfs.toChild(component));
+    case VFSType::Batteries:
+        return convert(batteriesVfs.toChild(component));
+    }
+    return NC::NavigateResult::NotFound;
 }
 
-NC::ConfigStatus FileVfsContext::getConfigStatus() const
+NC::ConfigStatus LuteVfsContext::getConfigStatus() const
 {
-    return convert(vfs.getConfigStatus());
+    switch (vfsType)
+    {
+    case VFSType::Disk:
+        return convert(fileVfs.getConfigStatus());
+    case VFSType::Std:
+        return convert(stdLibVfs.getConfigStatus());
+    case VFSType::Lute:
+        return convert(luteVfs.getConfigStatus());
+    case VFSType::Batteries:
+        return convert(batteriesVfs.getConfigStatus());
+    }
+    return NC::ConfigStatus::Absent;
 }
 
-NC::ConfigBehavior FileVfsContext::getConfigBehavior() const
+NC::ConfigBehavior LuteVfsContext::getConfigBehavior() const
 {
     return NC::ConfigBehavior::GetConfig;
 }
 
-std::optional<std::string> FileVfsContext::getAlias(const std::string& alias) const
+std::optional<std::string> LuteVfsContext::getAlias(const std::string& alias) const
 {
+    if (alias == "std")
+        return "@std";
+    if (alias == "lute")
+        return "@lute";
+    if (alias == "batteries")
+        return "@batteries";
     return std::nullopt;
 }
 
-std::optional<std::string> FileVfsContext::getConfig() const
+std::optional<std::string> LuteVfsContext::getConfig() const
 {
-    return vfs.getConfig();
+    switch (vfsType)
+    {
+    case VFSType::Disk:
+        return fileVfs.getConfig();
+    case VFSType::Std:
+        return stdLibVfs.getConfig();
+    case VFSType::Lute:
+        return luteVfs.getConfig();
+    case VFSType::Batteries:
+        return batteriesVfs.getConfig();
+    }
+    return std::nullopt;
 }
 
 // ErrorCapturer
@@ -143,7 +251,7 @@ std::optional<std::string> resolveRequire(std::string requirePath, std::string r
         return std::nullopt;
     }
 
-    FileVfsContext context{requirerChunkname.substr(1)};
+    LuteVfsContext context{requirerChunkname.substr(1)};
     ErrorCapturer errorCapturer{};
 
     Luau::Require::Navigator navigator{context, errorCapturer};
@@ -156,8 +264,48 @@ std::optional<std::string> resolveRequire(std::string requirePath, std::string r
         return std::nullopt;
     }
 
-    std::string absolutePath = context.vfs.getAbsoluteFilePath();
-    return absolutePath;
+    std::optional<std::string> result = std::nullopt;
+    switch (context.vfsType)
+    {
+    case LuteVfsContext::VFSType::Disk:
+        result = context.fileVfs.getAbsoluteFilePath();
+        break;
+    case LuteVfsContext::VFSType::Std:
+        result = context.stdLibVfs.getIdentifier();
+        break;
+    case LuteVfsContext::VFSType::Lute:
+        result = context.luteVfs.getIdentifier();
+        break;
+    case LuteVfsContext::VFSType::Batteries:
+        result = context.batteriesVfs.getIdentifier();
+        break;
+    }
+
+    return result;
+}
+
+std::optional<std::string> readSourceFromVfs(const std::string& name)
+{
+    if (name.rfind("@std", 0) == 0)
+    {
+        StdLibModuleResult result = getStdLibModule(name);
+        if (result.type == StdLibModuleType::Module)
+            return std::string(result.contents);
+    }
+    else if (name.rfind("@lute", 0) == 0)
+    {
+        LuteModuleResult result = getLuteModule(name);
+        if (result.type == LuteModuleType::Module)
+            return std::string(result.contents);
+    }
+    else if (name.rfind("@batteries", 0) == 0)
+    {
+        BatteryModuleResult result = getBatteryModule(name);
+        if (result.type == BatteryModuleType::Module)
+            return std::string(result.contents);
+    }
+
+    return readFile(name);
 }
 
 int resolverequire_luau(lua_State* L)

@@ -2,6 +2,7 @@
 
 #include "lute/configresolver.h"
 #include "lute/moduleresolver.h"
+#include "lute/resolverequire.h"
 
 #include "Luau/BuiltinDefinitions.h"
 #include "Luau/Error.h"
@@ -23,7 +24,7 @@ struct LuteFileResolver : Luau::LuteModuleResolver
         }
         else
         {
-            source = readFile(name);
+            source = ::readSourceFromVfs(name);
             sourceType = Luau::SourceCode::Module;
         }
 

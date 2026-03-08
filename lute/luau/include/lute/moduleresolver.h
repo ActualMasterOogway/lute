@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Luau/FileResolver.h"
+#include "lute/resolverequire.h"
 
 namespace Luau
 {
